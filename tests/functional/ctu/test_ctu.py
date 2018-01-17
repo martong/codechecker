@@ -61,7 +61,7 @@ class TestCtu(unittest.TestCase):
 
         shutil.rmtree(self.report_dir, ignore_errors=True)
 
-    def test_ctu_all_no_reparse(self):
+    def ctu_all_no_reparse(self):
         """ Test full CTU without reparse. """
 
         self.__test_ctu_all(False)
@@ -97,6 +97,7 @@ class TestCtu(unittest.TestCase):
         if not self.ctu_capable:
             self.skipTest(NO_CTU_MESSAGE)
         output = self.__do_ctu_all(reparse)
+        print(output)
         self.__check_ctu_analyze(output)
 
     def __test_ctu_collect(self, reparse):
@@ -120,7 +121,7 @@ class TestCtu(unittest.TestCase):
         """ Execute a full CTU run. """
 
         cmd = [self._codechecker_cmd, 'analyze', '-o', self.report_dir,
-               '--analyzers', 'clangsa', '--ctu-all']
+               '--analyzers', 'clangsa', '--ctu-all', '--verbose=debug']
         if reparse:
             cmd.append('--ctu-on-the-fly')
         cmd.append(self.buildlog)
