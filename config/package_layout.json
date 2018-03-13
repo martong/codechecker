@@ -27,8 +27,8 @@
   },
   "runtime": {
     "analyzers": {
-      "clangsa": "clang",
-      "clang-tidy": "clang-tidy"
+      "clangsa": "/home/egbomrt/WORK/llvm/build/release/bin/clang",
+      "clang-tidy": "/home/egbomrt/WORK/llvm/build/release/bin/clang-tidy"
     },
     "ld_logger_bin": "bin/ldlogger",
     "ld_logger_lib_name": "ldlogger.so",
@@ -38,6 +38,7 @@
     "version_file": "config/version.json",
     "checkers_severity_map_file": "config/checker_severity_map.json",
     "gdb_config_file": "config/gdbScript.gdb",
-    "ctu_func_map_cmd": "clang-func-mapping"
+    "ctu_func_map_cmd": "/home/egbomrt/WORK/llvm/build/release/bin/clang-func-mapping",
+    "compiler_resource_dir": "/home/egbomrt/WORK/llvm/build/release/lib/clang/5.0.0"
   }
 }

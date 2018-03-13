@@ -47,8 +47,8 @@ def get_std_flag(str):
 
 def create_ctu_dir(compile_cmds_file):
     prepare_all_cmd_for_ctu.execute(["CodeChecker", "analyze", "--ctu-collect",
-                                     compile_cmds_file, "-o", "cc_files"],
-                                    False)
+                                     compile_cmds_file, "-o", "cc_files"]
+                                    )
 
 
 def isCppOrCFile(file_name):
@@ -212,13 +212,69 @@ def get_new_analyzer_cmd(clang, old_cmd, file_dir_path, triple_arch):
     return ' '.join(new_cmd)
 
 
+def __eliminate_argument(arg_vect, opt_string, has_arg=False):
+    """
+    This call eliminates the parameters matching the given option string,
+    along with its argument coming directly after the opt-string if any,
+    from the command. The argument can possibly be separated from the flag.
+    """
+    while True:
+        option_index = next(
+            (i for i, c in enumerate(arg_vect)
+                if c.startswith(opt_string)), None)
+
+        if option_index:
+            separate = 1 if has_arg and \
+                len(arg_vect[option_index]) == len(opt_string) else 0
+            arg_vect = arg_vect[0:option_index] + \
+                arg_vect[option_index + separate + 1:]
+        else:
+            break
+
+    return arg_vect
+
+
 def get_preprocess_cmd(comp_cmd, repro_dir, filename):
+    command = comp_cmd.split(' ')
+    command = __eliminate_argument(command, '-MM')
+    command = __eliminate_argument(command, '-MF', True)
+    command = __eliminate_argument(command, '-MP')
+    command = __eliminate_argument(command, '-MT', True)
+    command = __eliminate_argument(command, '-MQ', True)
+    command = __eliminate_argument(command, '-MD')
+    command = __eliminate_argument(command, '-MMD')
+    # Clang contains some extra options.
+    command = __eliminate_argument(command, '-MJ', True)
+    command = __eliminate_argument(command, '-MV')
+    comp_cmd = ' '.join(command)
     preproc_cmd = str(comp_cmd.decode("utf-8")).split(' ')
     preproc_cmd = filter(lambda x: not re.match('-c', x), preproc_cmd)
     preproc_cmd.insert(1, '-E')
     out_ind = preproc_cmd.index('-o')
     preproc_cmd[out_ind + 1] = os.path.join(repro_dir, filename)
     return preproc_cmd
+
+
+def execute2(cmd, cwd, verbose=True):
+    if verbose:
+        print("Executing command: " + ' '.join(cmd))
+    try:
+        proc = subprocess.Popen(cmd, cwd=cwd,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        out, err = proc.communicate()
+        if verbose:
+            print("stdout:\n\n" + out.decode("utf-8"))
+            print("stderr:\n\n" + err.decode("utf-8"))
+
+        if proc.returncode != 0:
+            if verbose:
+                print('Unsuccessful run: "' + ' '.join(cmd) + '"')
+            raise Exception("Unsuccessful run of command.")
+        return out
+    except OSError:
+        print('Failed to run: "' + ' '.join(cmd) + '"')
+        raise
 
 
 def main():
@@ -314,6 +370,7 @@ def main():
     if args.verbose:
         print("Reducing test case from zip file: " + repro_zip)
 
+    # cleanup
     for file_name in os.listdir(os.getcwd()):
         if 'zip' in file_name or os.path.basename(output_dir) == file_name:
             continue
@@ -333,23 +390,28 @@ def main():
 
     if args.verbose:
         print('Preparing commands for CTU analysis.')
-    with nostdout():
-        prepare_all_cmd_for_ctu.prepare(pathOptions)
+    prepare_all_cmd_for_ctu.prepare(pathOptions)
 
     compile_cmds = json.load(open('./compile_cmd_DEBUG.json'))
     for cmd in compile_cmds:
         file_name = os.path.basename(cmd['file'])
         if not isCppOrCFile(file_name):
             continue
-        preproc = subprocess.Popen(
-            get_preprocess_cmd(
-                cmd['command'],
-                output_dir,
-                file_name),
-            cwd=cmd['directory'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE)
-        out, err = preproc.communicate()
+
+        # preproc = subprocess.Popen(
+            # get_preprocess_cmd(
+                # cmd['command'],
+                # output_dir,
+                # file_name),
+            # cwd=cmd['directory'],
+            # stdout=subprocess.PIPE,
+            # stderr=subprocess.PIPE)
+        # out, err = preproc.communicate()
+
+        execute2(get_preprocess_cmd(cmd['command'], output_dir, file_name),
+                 cwd=cmd['directory'])
+
+
         cmd['directory'] = output_dir
         cmd['file'] = os.path.join(output_dir, file_name)
         cmd['command'] = get_new_cmd(cmd['command'], output_dir)
@@ -362,23 +424,23 @@ def main():
     # writing compile commands to output dir
     with open(args.analyzer_command, 'r') as f:
         with open(analyzer_command_file, 'w') as f2:
-            triple_arch = prepare_all_cmd_for_ctu.get_triple_arch(f)
+            triple_arch = prepare_all_cmd_for_ctu.get_triple_arch(f.name)
             f2.write(get_new_analyzer_cmd(args.clang, f.read(), output_dir, triple_arch))
 
     # make it runnable
     st = os.stat(analyzer_command_file)
     os.chmod(analyzer_command_file, st.st_mode | stat.S_IEXEC)
 
-    if args.verbose:
-        print('cleanup')
+    # if args.verbose:
+        # print('cleanup')
     # cleanup
-    for file_name in os.listdir(os.getcwd()):
-        if 'zip' in file_name or os.path.basename(output_dir) == file_name:
-            continue
-        if os.path.isfile(file_name):
-            os.remove(file_name)
-        else:
-            shutil.rmtree(file_name)
+    # for file_name in os.listdir(os.getcwd()):
+        # if 'zip' in file_name or os.path.basename(output_dir) == file_name:
+            # continue
+        # if os.path.isfile(file_name):
+            # os.remove(file_name)
+        # else:
+            # shutil.rmtree(file_name)
 
     os.chdir(output_dir)
     if args.verbose:
@@ -429,7 +491,7 @@ def main():
     for file_name in os.listdir(output_dir):
         if not re.search('.orig$|creduce_test', file_name):
             continue
-        print file_name
+        print(file_name)
         assert(os.path.isfile(file_name))
         os.remove(file_name)
 
