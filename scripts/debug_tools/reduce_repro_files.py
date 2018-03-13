@@ -139,13 +139,14 @@ def reduce_main(reduce_file_name, assert_string, analyzer_command_file,
 
 
 def reduce_dep(dep_file_abs_path, assert_string,
-               analyzer_command_file, reduced_main_file_name, clang, stdflag):
+               analyzer_command_file, reduced_main_file_name, num_threads,
+               clang, stdflag):
     reduce_file_name = os.path.basename(dep_file_abs_path)
 
     conditions = []
     compilable_cond = get_compilable_cond(clang, stdflag, reduce_file_name)
     conditions.append(' '.join(compilable_cond))
-    prepare_all_cmd_for_ctu.get_triple_arch(analyzer_command_file)
+    triple_arch = prepare_all_cmd_for_ctu.get_triple_arch(analyzer_command_file)
     ast_dump_cond = get_ast_dump_cond(
         clang, stdflag, dep_file_abs_path, reduce_file_name, triple_arch)
     conditions.append(' '.join(ast_dump_cond))
@@ -156,7 +157,7 @@ def reduce_dep(dep_file_abs_path, assert_string,
         ctu_analyze_fail_cond, assert_string)
     conditions.append(' '.join(ctu_analyze_fail_cond))
 
-    run_creduce(conditions, reduce_file_name, 1)
+    run_creduce(conditions, reduce_file_name, num_threads)
 
 
 def get_new_cmd(old_cmd, file_dir_path):
@@ -250,6 +251,7 @@ def get_preprocess_cmd(comp_cmd, repro_dir, filename):
     preproc_cmd = str(comp_cmd.decode("utf-8")).split(' ')
     preproc_cmd = filter(lambda x: not re.match('-c', x), preproc_cmd)
     preproc_cmd.insert(1, '-E')
+    # preproc_cmd.insert(1, '-P')
     out_ind = preproc_cmd.index('-o')
     preproc_cmd[out_ind + 1] = os.path.join(repro_dir, filename)
     return preproc_cmd
@@ -456,44 +458,60 @@ def main():
 
     analyzed_file = get_analyzed_file_path(analyzer_command_file)
     analyzed_file_name = os.path.basename(analyzed_file)
+    std_flag = ""
     with open(analyzer_command_file, 'r') as f:
         std_flag = get_std_flag(f.read())
 
-    print('Starting to reduce the analyzed file: ' + analyzed_file)
-    reduce_main(analyzed_file_name, assert_string,
-                analyzer_command_file, args.j, args.clang, std_flag)
+    def reduce_iteration(compile_cmds, std_flag):
+        print('Starting to reduce dependent files.')
+        cmd_to_remove = set()
+        for cmd in compile_cmds:
+            file_name = os.path.basename(cmd['file'])
+            if not isCppOrCFile(file_name) or file_name == analyzed_file_name:
+                continue
+            std_flag = get_std_flag(cmd['command'])
+            if args.verbose:
+                print('Reducing dependent file: ' + cmd['file'])
+            reduce_dep(cmd['file'], assert_string, analyzer_command_file,
+                    analyzed_file_name, args.j, args.clang, std_flag)
 
-    print('Starting to reduce dependent files.')
-    cmd_to_remove = set()
-    for cmd in compile_cmds:
-        file_name = os.path.basename(cmd['file'])
-        if not isCppOrCFile(file_name) or file_name == analyzed_file_name:
-            continue
-        std_flag = get_std_flag(cmd['command'])
-        if args.verbose:
-            print('Reducing dependent file: ' + cmd['file'])
-        reduce_dep(cmd['file'], assert_string, analyzer_command_file,
-                   analyzed_file_name, args.clang, std_flag)
+            if os.stat(cmd['file']).st_size == 0:
+                # os.remove(cmd['file'])
+                cmd_to_remove.add(cmd['command'])
+            else:
+                create_ctu_dir("compile_commands.json")
 
-        if os.stat(cmd['file']).st_size == 0:
-            os.remove(cmd['file'])
-            cmd_to_remove.add(cmd['command'])
-        else:
-            create_ctu_dir("compile_commands.json")
+        # for cmd in compile_cmds:
+            # if os.stat(cmd['file']).st_size == 0:
+                # os.remove(cmd['file'])
 
-    # remove unnecessary commands from compile_commands_json
-    compile_cmds = [
-        x for x in compile_cmds if x['command'] not in cmd_to_remove]
-    with open(os.path.join(output_dir, 'compile_commands.json'), 'w') as cc:
-        cc.write(json.dumps(compile_cmds, indent=4))
+        # remove unnecessary commands from compile_commands_json
+        # compile_cmds = [
+            # x for x in compile_cmds if x['command'] not in cmd_to_remove]
+        # with open(os.path.join(output_dir, 'compile_commands.json'), 'w') as cc:
+            # cc.write(json.dumps(compile_cmds, indent=4))
+
+        print('Starting to reduce the analyzed file: ' + analyzed_file)
+        reduce_main(analyzed_file_name, assert_string,
+                    analyzer_command_file, args.j, args.clang, std_flag)
+
+    old_size = os.stat(analyzed_file).st_size
+    print('Analyzed file size: ' + str(old_size))
+    while True:
+        reduce_iteration(compile_cmds, std_flag)
+        new_size = os.stat(analyzed_file).st_size
+        print('Analyzed file size: ' + str(new_size))
+        if old_size <= new_size:
+            break
+        old_size = new_size
 
     # cleanup from output dir
-    for file_name in os.listdir(output_dir):
-        if not re.search('.orig$|creduce_test', file_name):
-            continue
-        print(file_name)
-        assert(os.path.isfile(file_name))
-        os.remove(file_name)
+    # for file_name in os.listdir(output_dir):
+        # if not re.search('.orig$|creduce_test', file_name):
+            # continue
+        # print(file_name)
+        # assert(os.path.isfile(file_name))
+        # os.remove(file_name)
 
     print("Reduced test cases can be found in directory: " + output_dir)
 
