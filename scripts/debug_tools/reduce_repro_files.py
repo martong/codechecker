@@ -336,6 +336,7 @@ def main():
         '-o', default='./bug_repro_dir',
         help='The output dir which contains the reduced files '
              'reproducing the bug.')
+    parser.add_argument('--continue_reduce', action='store_true')
     args = parser.parse_args()
     # change the paths to absolute
     repro_zip = os.path.abspath(args.repro_zip)
@@ -353,80 +354,97 @@ def main():
         if args.verbose:
             print('using clang from PATH')
 
-    pathOptions = prepare_all_cmd_for_ctu.PathOptions(
-        args.sources_root,
-        args.clang,
-        args.clang_plugin_name,
-        args.clang_plugin_path,
-        args.report_dir)
 
-    if args.verbose:
-        print("Creating output directory: " + output_dir)
-    try:
-        os.mkdir(output_dir)
-    except OSError:
-        print('error: Repro dir already exist!')
-        return
 
     analyzer_command_file = os.path.join(output_dir, 'analyze.sh')
 
-    # unzip
-    os.chdir(os.path.dirname(repro_zip))
-    args.sources_root = os.path.abspath(args.sources_root)
-    if args.verbose:
-        print("Reducing test case from zip file: " + repro_zip)
+    if not args.continue_reduce:
+        if args.verbose:
+            print("Creating output directory: " + output_dir)
+        try:
+            os.mkdir(output_dir)
+        except OSError:
+            print('error: Repro dir already exist!')
+            return
+        # writing analyzer-command to output dir
+        with open(args.analyzer_command, 'r') as f:
+            with open(analyzer_command_file, 'w') as f2:
+                triple_arch = prepare_all_cmd_for_ctu.get_triple_arch(f.name)
+                f2.write(get_new_analyzer_cmd(args.clang, f.read(), output_dir, triple_arch))
 
-    # cleanup
-    for file_name in os.listdir(os.getcwd()):
-        if 'zip' in file_name or os.path.basename(output_dir) == file_name:
-            continue
-        if os.path.isfile(file_name):
-            os.remove(file_name)
-        else:
-            shutil.rmtree(file_name)
+    analyzed_file = get_analyzed_file_path(analyzer_command_file)
+    analyzed_file_name = os.path.basename(analyzed_file)
+    std_flag = ""
+    with open(analyzer_command_file, 'r') as f:
+        std_flag = get_std_flag(f.read())
 
-    if args.verbose:
-        print('unzip reproduction files')
-    try:
-        output = subprocess.check_output(
-            ['timeout', '3', 'unzip', repro_zip], stderr=subprocess.STDOUT)
-    except subprocess.CalledProcessError as e:
-        print('error: unzip command has failed')
-        return
+    if not args.continue_reduce:
 
-    if args.verbose:
-        print('Preparing commands for CTU analysis.')
-    prepare_all_cmd_for_ctu.prepare(pathOptions)
+        pathOptions = prepare_all_cmd_for_ctu.PathOptions(
+            args.sources_root,
+            args.clang,
+            args.clang_plugin_name,
+            args.clang_plugin_path,
+            args.report_dir)
 
-    compile_cmds = json.load(open('./compile_cmd_DEBUG.json'))
-    for cmd in compile_cmds:
-        file_name = os.path.basename(cmd['file'])
-        if not isCppOrCFile(file_name):
-            continue
+        # unzip
+        os.chdir(os.path.dirname(repro_zip))
+        args.sources_root = os.path.abspath(args.sources_root)
+        if args.verbose:
+            print("Reducing test case from zip file: " + repro_zip)
 
-        execute2(get_preprocess_cmd(cmd['command'], output_dir, file_name),
-                 cwd=cmd['directory'])
+        # cleanup
+        for file_name in os.listdir(os.getcwd()):
+            if 'zip' in file_name or os.path.basename(output_dir) == file_name:
+                continue
+            if os.path.isfile(file_name):
+                os.remove(file_name)
+            else:
+                shutil.rmtree(file_name)
 
-        cmd['directory'] = output_dir
-        cmd['file'] = os.path.join(output_dir, file_name)
-        cmd['command'] = get_new_cmd(cmd['command'], output_dir)
+        if args.verbose:
+            print('unzip reproduction files')
+        try:
+            output = subprocess.check_output(
+                ['timeout', '3', 'unzip', repro_zip], stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            print('error: unzip command has failed')
+            return
 
-    # uniquing compile_commands
-    compile_cmds = {x['command']: x for x in compile_cmds}.values()
-    # writing compile commands to output dir
-    with open(os.path.join(output_dir, 'compile_commands.json'), 'w') as cc:
-        cc.write(json.dumps(compile_cmds, indent=4))
-    # writing compile commands to output dir
-    with open(args.analyzer_command, 'r') as f:
-        with open(analyzer_command_file, 'w') as f2:
-            triple_arch = prepare_all_cmd_for_ctu.get_triple_arch(f.name)
-            f2.write(get_new_analyzer_cmd(args.clang, f.read(), output_dir, triple_arch))
+        if args.verbose:
+            print('Preparing commands for CTU analysis.')
+        prepare_all_cmd_for_ctu.prepare(pathOptions)
 
-    # make it runnable
-    st = os.stat(analyzer_command_file)
-    os.chmod(analyzer_command_file, st.st_mode | stat.S_IEXEC)
+        compile_cmds = json.load(open('./compile_cmd_DEBUG.json'))
+        for cmd in compile_cmds:
+            file_name = os.path.basename(cmd['file'])
+            if not isCppOrCFile(file_name):
+                continue
 
-    os.chdir(output_dir)
+            execute2(get_preprocess_cmd(cmd['command'], output_dir, file_name),
+                    cwd=cmd['directory'])
+
+            cmd['directory'] = output_dir
+            cmd['file'] = os.path.join(output_dir, file_name)
+            cmd['command'] = get_new_cmd(cmd['command'], output_dir)
+
+        # uniquing compile_commands
+        compile_cmds = {x['command']: x for x in compile_cmds}.values()
+        # writing compile commands to output dir
+        with open(os.path.join(output_dir, 'compile_commands.json'), 'w') as cc:
+            cc.write(json.dumps(compile_cmds, indent=4))
+
+        # make it runnable
+        st = os.stat(analyzer_command_file)
+        os.chmod(analyzer_command_file, st.st_mode | stat.S_IEXEC)
+        os.chdir(output_dir)
+
+    else:
+        os.chdir(output_dir)
+        compile_cmds = json.load(open('compile_commands.json'))
+
+
+
     if args.verbose:
         print('creating ctu dir')
     create_ctu_dir('compile_commands.json')
@@ -437,12 +455,6 @@ def main():
     if not assert_string:
         print('assert string not found!')
         return
-
-    analyzed_file = get_analyzed_file_path(analyzer_command_file)
-    analyzed_file_name = os.path.basename(analyzed_file)
-    std_flag = ""
-    with open(analyzer_command_file, 'r') as f:
-        std_flag = get_std_flag(f.read())
 
     def reduce_iteration(compile_cmds, std_flag):
         print('Starting to reduce the analyzed file: ' + analyzed_file)
