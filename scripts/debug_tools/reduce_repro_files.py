@@ -337,6 +337,7 @@ def main():
         help='The output dir which contains the reduced files '
              'reproducing the bug.')
     parser.add_argument('--continue_reduce', action='store_true')
+    parser.add_argument('--dependent_first', action='store_true')
     args = parser.parse_args()
     # change the paths to absolute
     repro_zip = os.path.abspath(args.repro_zip)
@@ -457,9 +458,10 @@ def main():
         return
 
     def reduce_iteration(compile_cmds, std_flag):
-        print('Starting to reduce the analyzed file: ' + analyzed_file)
-        reduce_main(analyzed_file_name, assert_string,
-                    analyzer_command_file, args.j, args.clang, std_flag)
+        if not args.dependent_first:
+            print('Starting to reduce the analyzed file: ' + analyzed_file)
+            reduce_main(analyzed_file_name, assert_string,
+                        analyzer_command_file, args.j, args.clang, std_flag)
 
         print('Starting to reduce dependent files.')
         cmd_to_remove = set()
