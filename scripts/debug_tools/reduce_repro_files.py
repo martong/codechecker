@@ -64,7 +64,7 @@ def get_assertion_string(analyzer_command_file):
     error = subprocess.Popen(["bash", analyzer_command_file],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out_string, error_string = error.communicate()
-    assert_pattern = re.compile('warning: missing CXXRecordDecl in imported DeclContext')
+    assert_pattern = re.compile(re.escape('isa<InjectedClassNameType>(Decl->TypeForDecl)'))
     assert_match = assert_pattern.search(error_string)
     if not assert_match:
         return ""
@@ -357,8 +357,6 @@ def main():
 
 
 
-    analyzer_command_file = os.path.join(output_dir, 'analyze.sh')
-
     if not args.continue_reduce:
         if args.verbose:
             print("Creating output directory: " + output_dir)
@@ -367,19 +365,6 @@ def main():
         except OSError:
             print('error: Repro dir already exist!')
             return
-        # writing analyzer-command to output dir
-        with open(args.analyzer_command, 'r') as f:
-            with open(analyzer_command_file, 'w') as f2:
-                triple_arch = prepare_all_cmd_for_ctu.get_triple_arch(f.name)
-                f2.write(get_new_analyzer_cmd(args.clang, f.read(), output_dir, triple_arch))
-
-    analyzed_file = get_analyzed_file_path(analyzer_command_file)
-    analyzed_file_name = os.path.basename(analyzed_file)
-    std_flag = ""
-    with open(analyzer_command_file, 'r') as f:
-        std_flag = get_std_flag(f.read())
-
-    if not args.continue_reduce:
 
         pathOptions = prepare_all_cmd_for_ctu.PathOptions(
             args.sources_root,
@@ -435,12 +420,30 @@ def main():
         with open(os.path.join(output_dir, 'compile_commands.json'), 'w') as cc:
             cc.write(json.dumps(compile_cmds, indent=4))
 
+        analyzer_command_file = os.path.join(output_dir, 'analyze.sh')
+
+        # writing analyzer-command to output dir
+        with open(args.analyzer_command, 'r') as f:
+            with open(analyzer_command_file, 'w') as f2:
+                triple_arch = prepare_all_cmd_for_ctu.get_triple_arch(f.name)
+                f2.write(get_new_analyzer_cmd(args.clang, f.read(), output_dir, triple_arch))
+        analyzed_file = get_analyzed_file_path(analyzer_command_file)
+        analyzed_file_name = os.path.basename(analyzed_file)
+        std_flag = ""
+        with open(analyzer_command_file, 'r') as f:
+            std_flag = get_std_flag(f.read())
         # make it runnable
         st = os.stat(analyzer_command_file)
         os.chmod(analyzer_command_file, st.st_mode | stat.S_IEXEC)
         os.chdir(output_dir)
 
     else:
+        analyzer_command_file = os.path.join(output_dir, 'analyze.sh')
+        analyzed_file = get_analyzed_file_path(analyzer_command_file)
+        analyzed_file_name = os.path.basename(analyzed_file)
+        std_flag = ""
+        with open(analyzer_command_file, 'r') as f:
+            std_flag = get_std_flag(f.read())
         os.chdir(output_dir)
         compile_cmds = json.load(open('compile_commands.json'))
 
