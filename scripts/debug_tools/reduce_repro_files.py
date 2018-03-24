@@ -47,20 +47,24 @@ def get_std_flag(str):
 
 def create_ctu_dir(compile_cmds_file):
     prepare_all_cmd_for_ctu.execute(["CodeChecker", "analyze", "--ctu-collect",
+                                     "--compiler-includes-file",
+                                     "../compiler_includes_DEBUG.json",
+                                     "--compiler-target-file",
+                                     "../compiler_target_DEBUG.json",
                                      compile_cmds_file, "-o", "cc_files"]
                                     )
 
 
 def isCppOrCFile(file_name):
-    c_pattern = re.compile('\.c$|\.cpp$|\.cxx$')
+    c_pattern = re.compile('\.c$|\.cc$|\.cpp$|\.cxx$')
     return c_pattern.search(file_name)
 
 
 def get_assertion_string(analyzer_command_file):
     error = subprocess.Popen(["bash", analyzer_command_file],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    _, error_string = error.communicate()
-    assert_pattern = re.compile('Assertion.+failed\.')
+    out_string, error_string = error.communicate()
+    assert_pattern = re.compile('warning: missing CXXRecordDecl in imported DeclContext')
     assert_match = assert_pattern.search(error_string)
     if not assert_match:
         return ""
@@ -400,19 +404,8 @@ def main():
         if not isCppOrCFile(file_name):
             continue
 
-        # preproc = subprocess.Popen(
-            # get_preprocess_cmd(
-                # cmd['command'],
-                # output_dir,
-                # file_name),
-            # cwd=cmd['directory'],
-            # stdout=subprocess.PIPE,
-            # stderr=subprocess.PIPE)
-        # out, err = preproc.communicate()
-
         execute2(get_preprocess_cmd(cmd['command'], output_dir, file_name),
                  cwd=cmd['directory'])
-
 
         cmd['directory'] = output_dir
         cmd['file'] = os.path.join(output_dir, file_name)
@@ -433,17 +426,6 @@ def main():
     st = os.stat(analyzer_command_file)
     os.chmod(analyzer_command_file, st.st_mode | stat.S_IEXEC)
 
-    # if args.verbose:
-        # print('cleanup')
-    # cleanup
-    # for file_name in os.listdir(os.getcwd()):
-        # if 'zip' in file_name or os.path.basename(output_dir) == file_name:
-            # continue
-        # if os.path.isfile(file_name):
-            # os.remove(file_name)
-        # else:
-            # shutil.rmtree(file_name)
-
     os.chdir(output_dir)
     if args.verbose:
         print('creating ctu dir')
@@ -463,6 +445,10 @@ def main():
         std_flag = get_std_flag(f.read())
 
     def reduce_iteration(compile_cmds, std_flag):
+        print('Starting to reduce the analyzed file: ' + analyzed_file)
+        reduce_main(analyzed_file_name, assert_string,
+                    analyzer_command_file, args.j, args.clang, std_flag)
+
         print('Starting to reduce dependent files.')
         cmd_to_remove = set()
         for cmd in compile_cmds:
@@ -473,27 +459,9 @@ def main():
             if args.verbose:
                 print('Reducing dependent file: ' + cmd['file'])
             reduce_dep(cmd['file'], assert_string, analyzer_command_file,
-                    analyzed_file_name, args.j, args.clang, std_flag)
+                    analyzed_file_name, 1, args.clang, std_flag)
 
-            if os.stat(cmd['file']).st_size == 0:
-                # os.remove(cmd['file'])
-                cmd_to_remove.add(cmd['command'])
-            else:
-                create_ctu_dir("compile_commands.json")
-
-        # for cmd in compile_cmds:
-            # if os.stat(cmd['file']).st_size == 0:
-                # os.remove(cmd['file'])
-
-        # remove unnecessary commands from compile_commands_json
-        # compile_cmds = [
-            # x for x in compile_cmds if x['command'] not in cmd_to_remove]
-        # with open(os.path.join(output_dir, 'compile_commands.json'), 'w') as cc:
-            # cc.write(json.dumps(compile_cmds, indent=4))
-
-        print('Starting to reduce the analyzed file: ' + analyzed_file)
-        reduce_main(analyzed_file_name, assert_string,
-                    analyzer_command_file, args.j, args.clang, std_flag)
+            create_ctu_dir("compile_commands.json")
 
     old_size = os.stat(analyzed_file).st_size
     print('Analyzed file size: ' + str(old_size))
@@ -501,17 +469,9 @@ def main():
         reduce_iteration(compile_cmds, std_flag)
         new_size = os.stat(analyzed_file).st_size
         print('Analyzed file size: ' + str(new_size))
-        if old_size <= new_size:
-            break
+        # if old_size <= new_size:
+        break
         old_size = new_size
-
-    # cleanup from output dir
-    # for file_name in os.listdir(output_dir):
-        # if not re.search('.orig$|creduce_test', file_name):
-            # continue
-        # print(file_name)
-        # assert(os.path.isfile(file_name))
-        # os.remove(file_name)
 
     print("Reduced test cases can be found in directory: " + output_dir)
 
