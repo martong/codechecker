@@ -60,11 +60,11 @@ def isCppOrCFile(file_name):
     return c_pattern.search(file_name)
 
 
-def get_assertion_string(analyzer_command_file):
+def get_assertion_string(analyzer_command_file, assert_str):
     error = subprocess.Popen(["bash", analyzer_command_file],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out_string, error_string = error.communicate()
-    assert_pattern = re.compile(re.escape('isa<InjectedClassNameType>(Decl->TypeForDecl)'))
+    assert_pattern = re.compile(re.escape(assert_str))
     assert_match = assert_pattern.search(error_string)
     if not assert_match:
         return ""
@@ -338,6 +338,7 @@ def main():
              'reproducing the bug.')
     parser.add_argument('--continue_reduce', action='store_true')
     parser.add_argument('--dependent_first', action='store_true')
+    parser.add_argument('--assert_str', required=True)
     args = parser.parse_args()
     # change the paths to absolute
     repro_zip = os.path.abspath(args.repro_zip)
@@ -453,7 +454,7 @@ def main():
         print('creating ctu dir')
     create_ctu_dir('compile_commands.json')
 
-    assert_string = get_assertion_string(analyzer_command_file)
+    assert_string = get_assertion_string(analyzer_command_file, args.assert_str)
     if args.verbose:
         print('assert string found: ' + assert_string)
     if not assert_string:
