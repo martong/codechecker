@@ -11,7 +11,7 @@ import shutil
 import stat
 import json
 import contextlib
-import io
+import copy
 import sys
 import subprocess
 import multiprocessing
@@ -72,7 +72,7 @@ def get_assertion_string(analyzer_command_file, assert_str):
 
 
 def get_compilable_cond(clang, stdflag, file_name):
-    return [clang, '-c', '-Werror', stdflag, file_name]
+    return [clang, '-c', stdflag, file_name]
 
 
 def get_ast_dump_cond(clang, stdflag, file_abs_path, file_name, triple_arch):
@@ -110,6 +110,15 @@ def add_assert_cond(ctu_analyze_fail_cond, assert_string):
     return ctu_analyze_fail_cond
 
 
+def add_no_error_cond(error_cond):
+    error_string = "has incompatible definitions in different translation units"
+    match_condition = ['grep', '-v', '\"' + error_string + '\"']
+    piping = ['2>&1', '>/dev/null', '|', "tr '\\n' ' '", '|']
+    error_cond.extend(piping)
+    error_cond.extend(match_condition)
+    return error_cond
+
+
 def run_creduce(conditions, file_to_reduce, num_threads):
     # writing the test script for creduce
     creduce_test_name = 'creduce_test.sh'
@@ -132,8 +141,12 @@ def reduce_main(reduce_file_name, assert_string, analyzer_command_file,
 
     ctu_analyze_fail_cond = get_ctu_analyze_fail_cond(analyzer_command_file,
                                                       reduce_file_name)
-    normal_analyze_cond = get_normal_analyze_cond(ctu_analyze_fail_cond)
-    conditions.append(' '.join(normal_analyze_cond))
+    # normal_analyze_cond = get_normal_analyze_cond(ctu_analyze_fail_cond)
+    # conditions.append(' '.join(normal_analyze_cond))
+
+    ctu_analyze_no_error_cond = copy.deepcopy(ctu_analyze_fail_cond)
+    add_no_error_cond(ctu_analyze_no_error_cond)
+    conditions.append(' '.join(ctu_analyze_no_error_cond))
 
     ctu_analyze_fail_cond = add_assert_cond(
         ctu_analyze_fail_cond, assert_string)
@@ -157,6 +170,11 @@ def reduce_dep(dep_file_abs_path, assert_string,
 
     ctu_analyze_fail_cond = get_ctu_analyze_fail_cond(
         analyzer_command_file, os.path.abspath(reduced_main_file_name))
+
+    ctu_analyze_no_error_cond = copy.deepcopy(ctu_analyze_fail_cond)
+    add_no_error_cond(ctu_analyze_no_error_cond)
+    conditions.append(' '.join(ctu_analyze_no_error_cond))
+
     ctu_analyze_fail_cond = add_assert_cond(
         ctu_analyze_fail_cond, assert_string)
     conditions.append(' '.join(ctu_analyze_fail_cond))
@@ -474,12 +492,12 @@ def main():
             if not isCppOrCFile(file_name) or file_name == analyzed_file_name:
                 continue
             std_flag = get_std_flag(cmd['command'])
-            if args.verbose:
-                print('Reducing dependent file: ' + cmd['file'])
-            reduce_dep(cmd['file'], assert_string, analyzer_command_file,
-                    analyzed_file_name, 1, args.clang, std_flag)
-
-            create_ctu_dir("compile_commands.json")
+            if (os.stat(cmd['file']).st_size > 0):
+                if args.verbose:
+                    print('Reducing dependent file: ' + cmd['file'])
+                reduce_dep(cmd['file'], assert_string, analyzer_command_file,
+                        analyzed_file_name, 1, args.clang, std_flag)
+                create_ctu_dir("compile_commands.json")
 
     old_size = os.stat(analyzed_file).st_size
     print('Analyzed file size: ' + str(old_size))
